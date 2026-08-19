@@ -34,12 +34,43 @@ class TutorRequest(BaseModel):
     question: str = Field(min_length=1, max_length=4_000)
     language: Literal["javascript", "python", "java"]
     output: str = Field(default="", max_length=10_000)
+    mode: Literal["chat", "debug", "question"] = "chat"
+    problem: str = Field(default="", max_length=4_000)
 
 
 class TutorResponse(BaseModel):
     answer: str
     model: str
     sources: list[str]
+
+
+TREE_ONLY_SYSTEM_PROMPT = (
+    "You are a precise, friendly Tree Data Structures and Algorithms tutor. "
+    "Answer ONLY questions about trees, binary trees, BSTs, traversals, heaps, "
+    "tries, balanced trees, or tree algorithms. Use the retrieved knowledge "
+    "base as your primary factual context. Do not claim to have run code. "
+    "Keep answers concise and include corrected snippets only when useful."
+)
+
+DEBUG_SYSTEM_PROMPT = (
+    "You are a precise, friendly coding assistant embedded in a code editor. "
+    "You can see the user's current code and the latest terminal output below. "
+    "Diagnose errors with the exact line/cause when possible, suggest concrete fixes, "
+    "and answer questions about the code's behavior, complexity, or style. "
+    "You are not restricted to tree topics in this mode. Do not claim to have run the "
+    "code yourself beyond what the provided terminal output shows. Keep answers concise "
+    "and include corrected snippets only when useful."
+)
+
+QUESTION_SYSTEM_PROMPT = (
+    "You are a friendly Tree DSA mentor helping a learner solve the specific practice "
+    "problem described below in a code editor. You can see the problem statement, their "
+    "current code, and the latest terminal output. Give hints, explain the approach, or "
+    "point out the exact bug/line causing a failure — without simply handing over a full "
+    "solution unless they explicitly ask you to check or reveal one. Use the retrieved "
+    "tree knowledge base as supporting context. Do not claim to have run the code yourself "
+    "beyond what the provided terminal output shows."
+)
 
 
 def build_messages(request: TutorRequest, retrieved_context: str) -> list[dict[str, str]]:
@@ -54,17 +85,17 @@ Latest program output:
 {request.output or "(No output provided)"}
 ```"""
 
+    if request.mode == "debug":
+        system_prompt = DEBUG_SYSTEM_PROMPT
+    elif request.mode == "question":
+        system_prompt = QUESTION_SYSTEM_PROMPT
+        if request.problem:
+            context = f"Problem statement:\n{request.problem}\n\n{context}"
+    else:
+        system_prompt = TREE_ONLY_SYSTEM_PROMPT
+
     return [
-        {
-            "role": "system",
-            "content": (
-                "You are a precise, friendly Tree Data Structures and Algorithms tutor. "
-                "Answer ONLY questions about trees, binary trees, BSTs, traversals, heaps, "
-                "tries, balanced trees, or tree algorithms. Use the retrieved knowledge "
-                "base as your primary factual context. Do not claim to have run code. "
-                "Keep answers concise and include corrected snippets only when useful."
-            ),
-        },
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": f"Retrieved Tree DSA knowledge:\n{retrieved_context}\n\n{context}\n\nQuestion: {request.question}"},
     ]
 
@@ -84,7 +115,7 @@ async def questions() -> list[dict[str, str]]:
 @app.post("/api/tutor", response_model=TutorResponse)
 async def tutor(request: TutorRequest) -> TutorResponse:
     """Ask the configured local Ollama model about submitted code."""
-    if not is_tree_question(request.question):
+    if request.mode == "chat" and not is_tree_question(request.question):
         return TutorResponse(
             answer="I’m the Tree DSA tutor, so I can help with binary trees, BSTs, traversals, heaps, tries, LCA, and related tree algorithms.",
             model=OLLAMA_MODEL,

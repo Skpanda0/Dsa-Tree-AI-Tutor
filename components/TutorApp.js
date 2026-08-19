@@ -1,8 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Editor from "@monaco-editor/react";
-import { Bot, BookOpen, CheckCircle2, Code2, MessageCircle, Play, RotateCcw, Send, Terminal, XCircle } from "lucide-react";
+import {
+  Bot, BookOpen, Bug, CheckCircle2, ChevronLeft, Code2, ListChecks,
+  MessageCircle, Play, RotateCcw, Send, Terminal, XCircle
+} from "lucide-react";
 
 const languages = {
   javascript: { label: "JavaScript", monaco: "javascript", starter: `class TreeNode {\n  constructor(value, left = null, right = null) {\n    this.value = value; this.left = left; this.right = right;\n  }\n}\n\nfunction inorder(root) {\n  if (!root) return [];\n  return [...inorder(root.left), root.value, ...inorder(root.right)];\n}` },
@@ -11,6 +14,9 @@ const languages = {
 };
 
 const treePrompts = ["Explain inorder traversal", "How do I delete a BST node?", "What is the LCA?", "When should I use BFS?"];
+const debugPrompts = ["Explain this error", "Review my code", "Suggest a fix", "Optimize this code"];
+const questionPrompts = ["Give me a hint", "Explain the approach", "Fix the terminal error", "Check my solution"];
+
 const fallbackQuestion = { id: "inorder", title: "Binary Tree Inorder Traversal", difficulty: "Easy", prompt: "Given the root of a binary tree, return the inorder traversal of its node values.", starter: "def inorder_traversal(root):\n    # Write your solution\n    pass", test_cases: [["root = [1,null,2,3]", "[1,3,2]"], ["root = []", "[]"]] };
 const fallbackQuestions = [
   fallbackQuestion,
@@ -35,30 +41,105 @@ function challengeStarter(question, targetLanguage) {
   return `class Solution {\n    public Object ${name}(Object root) {\n        // Write your solution\n        return null;\n    }\n}\n`;
 }
 
+function debugGreeting() {
+  return { role: "assistant", text: "This is Debug mode. Write or paste any code, run it, and ask me about the code or the terminal output — I can see both." };
+}
+
+function questionGreeting(q) {
+  return { role: "assistant", text: `This is Question mode, working on “${q.title}”. Write your solution, run it against the examples, and ask me for hints or a review whenever you're stuck.` };
+}
+
+// Shared assistant panel used by both Debug and Question modes.
+// It always has access to the current code + terminal output as context.
+function CodeAssistantPanel({ messages, asking, input, setInput, onSend, quickPrompts }) {
+  return (
+    <div className="panel code-chat-panel">
+      <div className="panel-header">
+        <div className="panel-title"><Bot size={16} /> AI Assistant</div>
+        <span className="muted context-pill">Sees your code + terminal</span>
+      </div>
+      <div className="messages code-chat-messages">
+        {messages.map((message, index) => (
+          <div key={index} className={`chat-message ${message.role}`}>
+            <div>{message.text}</div>
+            {message.sources && <small>{message.sources}</small>}
+          </div>
+        ))}
+        {asking && <div className="chat-message assistant">Thinking…</div>}
+      </div>
+      <div className="quick-actions code-chat-quick">
+        {quickPrompts.map((prompt) => (
+          <button key={prompt} onClick={() => onSend(prompt)} disabled={asking}>{prompt}</button>
+        ))}
+      </div>
+      <div className="chat-input">
+        <textarea
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSend(); } }}
+          placeholder="Ask about your code or the terminal output…"
+          rows={3}
+        />
+        <button onClick={() => onSend()} disabled={asking} aria-label="Ask AI assistant"><Send size={17} /></button>
+      </div>
+    </div>
+  );
+}
+
 export default function TutorApp() {
   const [activeView, setActiveView] = useState("chat");
+  const [codeMode, setCodeMode] = useState(null); // null | "debug" | "question"
+
   const [language, setLanguage] = useState("javascript");
   const [code, setCode] = useState(languages.javascript.starter);
   const [output, setOutput] = useState("Choose a language and click Run.");
   const [running, setRunning] = useState(false);
+
+  // Tree Tutor chat (dashboard)
   const [asking, setAsking] = useState(false);
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState([{ role: "assistant", text: "I’m your Tree DSA tutor. Ask about binary trees, BSTs, traversals, heaps, tries, or LCA." }]);
+
+  // Code assistant chat (Debug / Question modes)
+  const [codeAsking, setCodeAsking] = useState(false);
+  const [codeInput, setCodeInput] = useState("");
+  const [codeMessages, setCodeMessages] = useState([debugGreeting()]);
+
   const [questions, setQuestions] = useState(fallbackQuestions);
   const [selectedQuestion, setSelectedQuestion] = useState(fallbackQuestion);
 
-  useEffect(() => {
-    fetch(tutorApi.replace(/\/api\/tutor$/, "/api/questions"))
-      .then((response) => response.ok ? response.json() : Promise.reject())
-      .then((data) => { if (data.length) { setQuestions(data); setSelectedQuestion(data[0]); } })
-      .catch(() => {});
-  }, []);
+  function startCodeMode(mode) {
+    setCodeMode(mode);
+    if (mode === "debug") {
+      setCode(languages[language].starter);
+      setOutput(`Ready to run ${languages[language].label} code.`);
+      setCodeMessages([debugGreeting()]);
+    } else {
+      setLanguage("python");
+      setCode(challengeStarter(selectedQuestion, "python"));
+      setOutput("Ready to run your solution.");
+      setCodeMessages([questionGreeting(selectedQuestion)]);
+    }
+  }
+
+  function backToCodeModes() {
+    setCodeMode(null);
+  }
 
   function changeLanguage(nextLanguage) {
     setLanguage(nextLanguage);
-    setCode(activeView === "editor" ? challengeStarter(selectedQuestion, nextLanguage) : languages[nextLanguage].starter);
-    setOutput(`Ready to run ${languages[nextLanguage].label} tree code.`);
+    setCode(codeMode === "question" ? challengeStarter(selectedQuestion, nextLanguage) : languages[nextLanguage].starter);
+    setOutput(`Ready to run ${languages[nextLanguage].label} code.`);
   }
+
+  function pickQuestion(nextQuestion) {
+    setSelectedQuestion(nextQuestion);
+    setLanguage("python");
+    setCode(challengeStarter(nextQuestion, "python"));
+    setOutput("Ready to run your solution.");
+    setCodeMessages([questionGreeting(nextQuestion)]);
+  }
+
   async function runCode() {
     setRunning(true); setOutput("Running...");
     try {
@@ -68,6 +149,7 @@ export default function TutorApp() {
     } catch { setOutput("Error: Could not reach the code runner."); }
     finally { setRunning(false); }
   }
+
   async function askTutor(prompt = question) {
     if (!prompt.trim() || asking) return;
     setMessages((current) => [...current, { role: "user", text: prompt }]); setQuestion(""); setAsking(true);
@@ -79,13 +161,148 @@ export default function TutorApp() {
     } catch (error) { setMessages((current) => [...current, { role: "assistant", text: error.message || "Tutor request failed. Please try again." }]); }
     finally { setAsking(false); }
   }
+
+  async function askCodeAssistant(prompt = codeInput) {
+    if (!prompt.trim() || codeAsking) return;
+    setCodeMessages((current) => [...current, { role: "user", text: prompt }]); setCodeInput(""); setCodeAsking(true);
+    try {
+      const response = await fetch(tutorApi, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code,
+          output,
+          question: prompt,
+          language,
+          mode: codeMode,
+          problem: codeMode === "question" ? selectedQuestion.prompt : undefined
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Assistant request failed.");
+      setCodeMessages((current) => [...current, { role: "assistant", text: data.answer, sources: data.sources?.length ? `Knowledge: ${data.sources.join(" · ")}` : "" }]);
+    } catch (error) { setCodeMessages((current) => [...current, { role: "assistant", text: error.message || "Assistant request failed. Please try again." }]); }
+    finally { setCodeAsking(false); }
+  }
+
   const outputIsError = /error|exception|failed/.test(output.toLowerCase());
 
   return <main className="app-shell">
-    <header className="topbar"><div className="brand"><div className="brand-icon"><Code2 size={20} /></div><div><div className="brand-title">Tree DSA Tutor</div><div className="brand-subtitle">RAG-powered learning workspace</div></div></div><div className="tree-badge"><BookOpen size={14} /> Tree knowledge base</div></header>
+    <header className="topbar">
+      <div className="brand"><div className="brand-icon"><Code2 size={20} /></div><div><div className="brand-title">Tree DSA Tutor</div><div className="brand-subtitle">RAG-powered learning workspace</div></div></div>
+      <div className="tree-badge"><BookOpen size={14} /> Tree knowledge base</div>
+    </header>
     <section className="app-layout">
-      <nav className="sidebar" aria-label="Workspace navigation"><button className={activeView === "chat" ? "nav-item active" : "nav-item"} onClick={() => setActiveView("chat")}><MessageCircle size={19} /><span>Chat</span></button><button className={activeView === "editor" ? "nav-item active" : "nav-item"} onClick={() => setActiveView("editor")}><Code2 size={19} /><span>Code Editor</span></button></nav>
-      {activeView === "chat" ? <section className="chat-page panel"><div className="chat-page-header"><div className="bot-icon"><Bot size={20} /></div><div><div className="panel-title">Tree DSA chat</div><div className="muted">Answers are grounded in the local tree knowledge base.</div></div></div><div className="messages">{messages.map((message, index) => <div key={index} className={`chat-message ${message.role}`}><div>{message.text}</div>{message.sources && <small>{message.sources}</small>}</div>)}{asking && <div className="chat-message assistant">Thinking…</div>}</div><div className="quick-actions">{treePrompts.map((prompt) => <button key={prompt} onClick={() => askTutor(prompt)}>{prompt}</button>)}</div><div className="chat-input"><textarea value={question} onChange={(e) => setQuestion(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); askTutor(); } }} placeholder="Ask a Tree DSA question…" rows={3} /><button onClick={() => askTutor()} disabled={asking} aria-label="Ask tree tutor"><Send size={17} /></button></div></section> : <section className="editor-page"><div className="editor-toolbar"><div><div className="panel-title"><Code2 size={16} /> Tree challenge</div><div className="muted">Choose a problem, write your solution, then run it.</div></div><div className="top-actions"><button className="ghost-button" onClick={() => setCode(challengeStarter(selectedQuestion, language))}><RotateCcw size={16} /> Reset</button><button className="run-button" onClick={runCode} disabled={running}><Play size={16} fill="currentColor" />{running ? "Running..." : "Run"}</button></div></div><div className="leetcode-layout"><aside className="problem-panel panel"><select className="problem-select" value={selectedQuestion.id} onChange={(e) => { const next = questions.find((item) => item.id === e.target.value); setSelectedQuestion(next); setLanguage("python"); setCode(challengeStarter(next, "python")); }}>{questions.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select><h2>{selectedQuestion.title}</h2><span className={`difficulty ${selectedQuestion.difficulty.toLowerCase()}`}>{selectedQuestion.difficulty}</span><p>{selectedQuestion.prompt}</p><div className="tree-reference"><strong>Tree representation</strong><pre>      1{`\n`}     / \\{`\n`}    2   3{`\n`}   / \\{`\n`}  4   5</pre><small>Level-order array: [1,2,3,4,5]</small></div><h3>Examples</h3>{testCasesFor(selectedQuestion).map(([input, expected], index) => <div className="test-case" key={index}><strong>Example {index + 1}</strong><pre>Input: {input}{"\n"}Output: {expected}</pre></div>)}<h3>Constraints</h3><p className="constraints">Use O(n) time where possible. Handle null/empty trees and duplicate values when the problem permits them.</p></aside><div className="editor-split"><div className="panel editor-panel"><div className="panel-header"><div className="panel-title">Solution — implement only the function</div><select className="language-select" value={language} onChange={(e) => changeLanguage(e.target.value)}>{Object.entries(languages).map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}</select></div><div className="editor-wrap"><Editor height="100%" language={languages[language].monaco} theme="vs-dark" value={code} onChange={(value) => setCode(value ?? "")} options={{ minimap: { enabled: false }, fontSize: 14, padding: { top: 16 }, automaticLayout: true, tabSize: language === "python" ? 4 : 2, wordWrap: "on", scrollBeyondLastLine: false }} /></div></div><div className="panel terminal-panel"><div className="panel-header"><div className="panel-title"><Terminal size={16} /> Test output</div><span className={`status ${outputIsError ? "error" : "success"}`}>{outputIsError ? <XCircle size={14} /> : <CheckCircle2 size={14} />}{outputIsError ? "Error" : "Output"}</span></div><pre className="terminal-output">{output}</pre><div className="terminal-chat"><div className="panel-title"><Bot size={15} /> Need a hint?</div><button onClick={() => { setActiveView("chat"); askTutor(`I am solving ${selectedQuestion.title}. Give me a hint without the full solution.`); }}>Ask AI for a hint</button><button onClick={() => { setActiveView("chat"); askTutor(`I am solving ${selectedQuestion.title}. Help me fix this error: ${output}`); }}>Fix terminal error</button></div></div></div></div></section>}
+      <nav className="sidebar" aria-label="Workspace navigation">
+        <button className={activeView === "chat" ? "nav-item active" : "nav-item"} onClick={() => setActiveView("chat")}><MessageCircle size={19} /><span>Chat</span></button>
+        <button className={activeView === "editor" ? "nav-item active" : "nav-item"} onClick={() => setActiveView("editor")}><Code2 size={19} /><span>Code Editor</span></button>
+      </nav>
+
+      {activeView === "chat" && (
+        <section className="chat-page panel">
+          <div className="chat-page-header"><div className="bot-icon"><Bot size={20} /></div><div><div className="panel-title">Tree DSA chat</div><div className="muted">Answers are grounded in the local tree knowledge base.</div></div></div>
+          <div className="messages">
+            {messages.map((message, index) => <div key={index} className={`chat-message ${message.role}`}><div>{message.text}</div>{message.sources && <small>{message.sources}</small>}</div>)}
+            {asking && <div className="chat-message assistant">Thinking…</div>}
+          </div>
+          <div className="quick-actions">{treePrompts.map((prompt) => <button key={prompt} onClick={() => askTutor(prompt)}>{prompt}</button>)}</div>
+          <div className="chat-input">
+            <textarea value={question} onChange={(e) => setQuestion(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); askTutor(); } }} placeholder="Ask a Tree DSA question…" rows={3} />
+            <button onClick={() => askTutor()} disabled={asking} aria-label="Ask tree tutor"><Send size={17} /></button>
+          </div>
+        </section>
+      )}
+
+      {activeView === "editor" && !codeMode && (
+        <section className="code-mode-picker">
+          <div className="code-mode-picker-inner">
+            <h2>What do you want to do?</h2>
+            <p className="muted">Both options give you a live code editor, a terminal, and an AI assistant that reads your code and output.</p>
+            <div className="mode-cards">
+              <button className="mode-card" onClick={() => startCodeMode("debug")}>
+                <div className="mode-card-icon"><Bug size={22} /></div>
+                <div className="mode-card-title">Debug Code</div>
+                <div className="mode-card-desc">Paste your own code, run it, and get AI help understanding errors or improving it.</div>
+              </button>
+              <button className="mode-card" onClick={() => startCodeMode("question")}>
+                <div className="mode-card-icon"><ListChecks size={22} /></div>
+                <div className="mode-card-title">Do a Question</div>
+                <div className="mode-card-desc">Pick a Tree DSA problem, solve it in the editor, and get hints from the AI assistant.</div>
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {activeView === "editor" && codeMode && (
+        <section className="editor-page">
+          <div className="editor-toolbar">
+            <div>
+              <button className="ghost-button back-button" onClick={backToCodeModes}><ChevronLeft size={16} /> Change mode</button>
+              <div className="panel-title" style={{ marginTop: 8 }}>
+                {codeMode === "debug" ? <><Bug size={16} /> Debug Code</> : <><ListChecks size={16} /> {selectedQuestion.title}</>}
+              </div>
+              <div className="muted">{codeMode === "debug" ? "Write or paste any code, then run and ask the assistant." : "Choose a problem, write your solution, then run it."}</div>
+            </div>
+            <div className="top-actions">
+              <button className="ghost-button" onClick={() => setCode(codeMode === "question" ? challengeStarter(selectedQuestion, language) : languages[language].starter)}><RotateCcw size={16} /> Reset</button>
+              <button className="run-button" onClick={runCode} disabled={running}><Play size={16} fill="currentColor" />{running ? "Running..." : "Run"}</button>
+            </div>
+          </div>
+
+          <div className={codeMode === "question" ? "code-layout with-problem" : "code-layout"}>
+            {codeMode === "question" && (
+              <aside className="problem-panel panel">
+                <select className="problem-select" value={selectedQuestion.id} onChange={(e) => pickQuestion(questions.find((item) => item.id === e.target.value))}>
+                  {questions.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
+                </select>
+                <h2>{selectedQuestion.title}</h2>
+                <span className={`difficulty ${selectedQuestion.difficulty.toLowerCase()}`}>{selectedQuestion.difficulty}</span>
+                <p>{selectedQuestion.prompt}</p>
+                <div className="tree-reference">
+                  <strong>Tree representation</strong>
+                  <pre>      1{`\n`}     / \\{`\n`}    2   3{`\n`}   / \\{`\n`}  4   5</pre>
+                  <small>Level-order array: [1,2,3,4,5]</small>
+                </div>
+                <h3>Examples</h3>
+                {testCasesFor(selectedQuestion).map(([input, expected], index) => <div className="test-case" key={index}><strong>Example {index + 1}</strong><pre>Input: {input}{"\n"}Output: {expected}</pre></div>)}
+                <h3>Constraints</h3>
+                <p className="constraints">Use O(n) time where possible. Handle null/empty trees and duplicate values when the problem permits them.</p>
+              </aside>
+            )}
+
+            <div className="code-main">
+              <div className="panel editor-panel">
+                <div className="panel-header">
+                  <div className="panel-title">{codeMode === "debug" ? "Editor" : "Solution — implement only the function"}</div>
+                  <select className="language-select" value={language} onChange={(e) => changeLanguage(e.target.value)}>
+                    {Object.entries(languages).map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}
+                  </select>
+                </div>
+                <div className="editor-wrap">
+                  <Editor height="100%" language={languages[language].monaco} theme="vs-dark" value={code} onChange={(value) => setCode(value ?? "")} options={{ minimap: { enabled: false }, fontSize: 14, padding: { top: 16 }, automaticLayout: true, tabSize: language === "python" ? 4 : 2, wordWrap: "on", scrollBeyondLastLine: false }} />
+                </div>
+              </div>
+              <div className="panel terminal-panel">
+                <div className="panel-header">
+                  <div className="panel-title"><Terminal size={16} /> Terminal output</div>
+                  <span className={`status ${outputIsError ? "error" : "success"}`}>{outputIsError ? <XCircle size={14} /> : <CheckCircle2 size={14} />}{outputIsError ? "Error" : "Output"}</span>
+                </div>
+                <pre className="terminal-output">{output}</pre>
+              </div>
+            </div>
+
+            <CodeAssistantPanel
+              messages={codeMessages}
+              asking={codeAsking}
+              input={codeInput}
+              setInput={setCodeInput}
+              onSend={askCodeAssistant}
+              quickPrompts={codeMode === "debug" ? debugPrompts : questionPrompts}
+            />
+          </div>
+        </section>
+      )}
     </section>
   </main>;
 }
