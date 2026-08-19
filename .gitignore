@@ -1,0 +1,47 @@
+# Dependencies and package-manager files
+node_modules/
+.pnp
+.pnp.js
+# Next.js build output and local exports
+.next/
+out/
+dist/
+build/
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+backend/.env
+backend/.env.*
+!backend/.env.example
+# Python virtual environments, caches, coverage, and builds
+backend/.venv/
+backend/venv/
+backend/env/
+**/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+*.egg-info/
+# Logs and local databases
+*.log
+logs/
+*.sqlite
+*.sqlite3
+*.db
+# Editor and operating-system files
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo
+# Vercel / deployment-local state
+.vercel/
