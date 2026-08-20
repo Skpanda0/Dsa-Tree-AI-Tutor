@@ -1,20 +1,18 @@
-"""FastAPI service for the local Ollama-powered code tutor."""
+"""FastAPI service for the local Ollama-powered code tutor, backed by CrewAI agents."""
 
+import asyncio
 import os
 from typing import Literal
 
-import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from database import save_conversation, search_knowledge
+from agents import run_crew
 from question_bank import QUESTIONS
 from rag import context_for, is_tree_question
 
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:7b")
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "nomic-embed-text")
 MAX_CODE_LENGTH = 50_000
 
 app = FastAPI(title="AI Code Tutor API", version="1.0.0")
@@ -44,60 +42,18 @@ class TutorResponse(BaseModel):
     sources: list[str]
 
 
-TREE_ONLY_SYSTEM_PROMPT = (
-    "You are a precise, friendly Tree Data Structures and Algorithms tutor. "
-    "Answer ONLY questions about trees, binary trees, BSTs, traversals, heaps, "
-    "tries, balanced trees, or tree algorithms. Use the retrieved knowledge "
-    "base as your primary factual context. Do not claim to have run code. "
-    "Keep answers concise and include corrected snippets only when useful."
-)
-
-DEBUG_SYSTEM_PROMPT = (
-    "You are a precise, friendly coding assistant embedded in a code editor. "
-    "You can see the user's current code and the latest terminal output below. "
-    "Diagnose errors with the exact line/cause when possible, suggest concrete fixes, "
-    "and answer questions about the code's behavior, complexity, or style. "
-    "You are not restricted to tree topics in this mode. Do not claim to have run the "
-    "code yourself beyond what the provided terminal output shows. Keep answers concise "
-    "and include corrected snippets only when useful."
-)
-
-QUESTION_SYSTEM_PROMPT = (
-    "You are a friendly Tree DSA mentor helping a learner solve the specific practice "
-    "problem described below in a code editor. You can see the problem statement, their "
-    "current code, and the latest terminal output. Give hints, explain the approach, or "
-    "point out the exact bug/line causing a failure — without simply handing over a full "
-    "solution unless they explicitly ask you to check or reveal one. Use the retrieved "
-    "tree knowledge base as supporting context. Do not claim to have run the code yourself "
-    "beyond what the provided terminal output shows."
-)
-
-
-def build_messages(request: TutorRequest, retrieved_context: str) -> list[dict[str, str]]:
-    context = f"""Language: {request.language}
-Code:
-```{request.language}
-{request.code}
-```
-
-Latest program output:
-```
-{request.output or "(No output provided)"}
-```"""
-
-    if request.mode == "debug":
-        system_prompt = DEBUG_SYSTEM_PROMPT
-    elif request.mode == "question":
-        system_prompt = QUESTION_SYSTEM_PROMPT
-        if request.problem:
-            context = f"Problem statement:\n{request.problem}\n\n{context}"
-    else:
-        system_prompt = TREE_ONLY_SYSTEM_PROMPT
-
-    return [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"Retrieved Tree DSA knowledge:\n{retrieved_context}\n\n{context}\n\nQuestion: {request.question}"},
-    ]
+def build_context(request: TutorRequest, retrieved_context: str) -> str:
+    """Assemble the context block handed to the mode's CrewAI agent as its task description."""
+    parts = []
+    if request.mode == "question" and request.problem:
+        parts.append(f"Problem statement:\n{request.problem}")
+    parts.append(
+        f"Language: {request.language}\n"
+        f"Code:\n```{request.language}\n{request.code}\n```\n\n"
+        f"Latest program output:\n```\n{request.output or '(No output provided)'}\n```"
+    )
+    parts.append(f"Retrieved Tree DSA knowledge:\n{retrieved_context or '(No matching knowledge-base sections)'}")
+    return "\n\n".join(parts)
 
 
 @app.get("/health")
@@ -107,14 +63,14 @@ async def health() -> dict[str, str]:
 
 
 @app.get("/api/questions")
-async def questions() -> list[dict[str, str]]:
-    """Return the Tree DSA challenge bank for the coding workspace."""
+async def questions() -> list[dict]:
+    """Return the Tree DSA challenge bank."""
     return QUESTIONS
 
 
 @app.post("/api/tutor", response_model=TutorResponse)
 async def tutor(request: TutorRequest) -> TutorResponse:
-    """Ask the configured local Ollama model about submitted code."""
+    """Route the request to the CrewAI agent for its mode (chat / debug / question)."""
     if request.mode == "chat" and not is_tree_question(request.question):
         return TutorResponse(
             answer="I’m the Tree DSA tutor, so I can help with binary trees, BSTs, traversals, heaps, tries, LCA, and related tree algorithms.",
@@ -123,46 +79,23 @@ async def tutor(request: TutorRequest) -> TutorResponse:
         )
 
     retrieved_context, sources = context_for(request.question)
-    # If pgvector has been seeded, prefer semantic retrieval over keyword fallback.
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            embedding_response = await client.post(
-                f"{OLLAMA_URL.rstrip('/')}/api/embed",
-                json={"model": EMBEDDING_MODEL, "input": request.question},
-            )
-            embedding_response.raise_for_status()
-            vector_documents = search_knowledge(embedding_response.json()["embeddings"][0])
-            if vector_documents:
-                retrieved_context = "\n\n".join(item["content"] for item in vector_documents)
-                sources = [item["title"] for item in vector_documents]
-    except (httpx.HTTPError, KeyError, IndexError):
-        pass
-    payload = {
-        "model": OLLAMA_MODEL,
-        "messages": build_messages(request, retrieved_context),
-        "stream": False,
-        "options": {"temperature": 0.2},
-    }
+    context = build_context(request, retrieved_context)
 
     try:
-        async with httpx.AsyncClient(timeout=90.0) as client:
-            response = await client.post(f"{OLLAMA_URL.rstrip('/')}/api/chat", json=payload)
-            response.raise_for_status()
-            data = response.json()
-    except httpx.ConnectError as error:
-        raise HTTPException(
-            status_code=503,
-            detail="Cannot reach Ollama. Start it with `ollama serve` and pull the configured model.",
-        ) from error
-    except httpx.TimeoutException as error:
-        raise HTTPException(status_code=504, detail="Ollama took too long to respond.") from error
-    except httpx.HTTPStatusError as error:
-        detail = error.response.text or "Ollama returned an error."
-        raise HTTPException(status_code=502, detail=detail) from error
+        # CrewAI's kickoff() is a blocking call, so it runs off the event loop.
+        answer = await asyncio.to_thread(run_crew, request.mode, context, request.question)
+    except Exception as error:  # CrewAI/LiteLLM raise a range of provider errors here.
+        message = str(error).lower()
+        if "connect" in message or "connection" in message:
+            raise HTTPException(
+                status_code=503,
+                detail="Cannot reach Ollama. Start it with `ollama serve` and pull the configured model.",
+            ) from error
+        if "timeout" in message or "timed out" in message:
+            raise HTTPException(status_code=504, detail="Ollama took too long to respond.") from error
+        raise HTTPException(status_code=502, detail=f"Agent request failed: {error}") from error
 
-    answer = data.get("message", {}).get("content", "").strip()
     if not answer:
-        raise HTTPException(status_code=502, detail="Ollama returned an empty response.")
+        raise HTTPException(status_code=502, detail="The agent returned an empty response.")
 
-    save_conversation(request.question, answer)
     return TutorResponse(answer=answer, model=OLLAMA_MODEL, sources=sources)
