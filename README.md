@@ -1,189 +1,107 @@
 # TreeTutor AI
 
-TreeTutor AI is a Tree Data Structures and Algorithms learning platform. It is designed around three focused learning experiences rather than a generic chatbot:
+TreeTutor AI is a learning workspace for Tree Data Structures and Algorithms. It combines a Next.js interface for writing and running small programs with an optional local Python tutor service powered by Ollama.
 
-- **Tree Tutor** — ask questions about Tree DSA concepts, patterns, complexity, and examples.
-- **Code Lab** — write and run small JavaScript Tree DSA exercises, with guided AI-style feedback.
-- **Practice and Concepts** — browse Tree problems and build conceptual foundations before solving them.
+The project is deliberately database-free. Practice questions and Tree DSA reference material live in version-controlled files, so a fresh clone can run without Docker, migrations, credentials, embeddings, or external storage.
 
-The repository has separate frontend and Python backend folders. The frontend currently uses polished mock data so it can be developed without a live API. Backend integration points are marked with `TODO` comments in the UI.
+## Features
+
+- Tree DSA tutoring with focused context from a local knowledge base.
+- Code Lab that runs JavaScript, Python, or Java locally through the Next.js API.
+- Built-in Tree DSA practice question bank.
+- Separate tutor modes for conceptual questions, debugging guidance, and problem-solving hints.
 
 ## Tech stack
 
 | Area | Technology |
 | --- | --- |
-| Frontend | Next.js 15, React 19, JavaScript, Tailwind CSS 4 |
-| Icons | Lucide React |
-| Backend | Python (existing service under `backend/`) |
-| Planned database | PostgreSQL |
-| Planned AI capabilities | Python agents, RAG, code analysis, question generation |
+| Frontend | Next.js 15, React 19, JavaScript |
+| Local API routes | Next.js route handlers |
+| Tutor backend | Python, FastAPI, CrewAI, Ollama |
+| Knowledge retrieval | Local Markdown with dependency-free keyword retrieval |
+| Content storage | Version-controlled Markdown and Python files |
 
 ## Project structure
 
 ```text
 .
-├── app/                    # Next.js routes and page UI
-│   ├── dashboard/          # Tree Tutor chat
-│   ├── debugger/           # Code Lab
-│   ├── practice/           # Problem catalogue and problem page
-│   ├── concepts/           # Concept catalogue and lesson page
-│   └── login/              # Authentication UI placeholder
-├── components/
-│   ├── chat/               # Tutor chat components
-│   ├── layout/             # App shell and sidebar
-│   ├── practice/           # Problem cards
-│   └── tree/               # Tree visualizer
-├── data/mockData.js        # Temporary frontend mock data
-├── backend/                # Existing Python AI/RAG service
+├── app/                    # Next.js pages and API routes
+├── components/             # Tutor UI
+├── backend/
+│   ├── knowledge_base/     # Local Tree DSA reference material
+│   ├── agents.py           # Tutor, debugging, and mentor agents
+│   ├── main.py             # FastAPI service
+│   ├── question_bank.py    # Built-in practice questions
+│   └── rag.py              # Local retrieval helper
 ├── package.json
 └── README.md
 ```
 
 ## Run the frontend
 
-### Prerequisites
-
-- Node.js 20.9 or newer (LTS recommended)
-- npm
-
-### Install and start
+Prerequisites: Node.js 20.9+ and npm.
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3000](http://localhost:3000). On Windows PowerShell, use `npm.cmd install` and `npm.cmd run dev` if the execution policy blocks npm.
 
-On Windows PowerShell, if your execution policy blocks `npm`, use:
-
-```powershell
-npm.cmd install
-npm.cmd run dev
-```
-
-### Production check
+For a production check:
 
 ```bash
 npm run build
 npm run start
 ```
 
-The project must build successfully before deployment. The latest production build completes successfully.
+## Run the Python tutor backend
 
-## Available frontend pages
-
-| Route | Purpose |
-| --- | --- |
-| `/` | Product landing page |
-| `/login` | Auth UI placeholder |
-| `/dashboard` | Tree Tutor chat workspace |
-| `/debugger` | Lightweight Code Lab and guided question picker |
-| `/practice` | Tree problem catalogue |
-| `/practice/[id]` | Individual problem workspace |
-| `/concepts` | Tree concept library |
-| `/concepts/[slug]` | Individual concept lesson |
-
-## How the current UI works
-
-### Tree Tutor
-
-The dashboard is intentionally viewport-bound: the overall page does not scroll, while the **message history is the scrollable chat area**. The tutor response, code example, source list, and tree visualization are mock content for now.
-
-### Code Lab
-
-The Code Lab is deliberately not a full LeetCode clone. It provides:
-
-1. A simple JavaScript editor.
-2. A `Run code` action and a local output area.
-3. An AI-assistant-style guidance panel.
-4. Tree questions that can be selected and loaded into the same editor.
-
-Browser execution is **JavaScript only**. It is useful for simple examples and learning interactions. Never treat browser execution as a secure sandbox or as server-side code execution. Real multi-language compilation, secure test execution, and AI analysis should be handled by the Python backend.
-
-## Mock data and future API integration
-
-`data/mockData.js` is the single source of mock tree, concept, and practice data. This makes the eventual transition to backend data straightforward.
-
-Suggested future backend endpoints:
-
-```text
-POST /chat       # Tutor question -> answer, sources, tree data
-POST /debug      # Code + language -> analysis and suggested fix
-GET  /problems   # Practice catalogue
-GET  /concepts   # Learning catalogue/content
-POST /submit     # Submission -> test results and AI feedback
-GET  /history    # User chat history
-```
-
-Keep API calls in small client/service functions. Do not mix request logic through visual components. Replace each mock-data import with an isolated function that calls the Python service and handles loading, error, and empty states.
-
-## PostgreSQL setup for the backend
-
-PostgreSQL credentials must only be used by the Python backend. Do **not** expose the database URL in a Next.js client component or a `NEXT_PUBLIC_*` environment variable.
-
-### 1. Create the database
-
-Run in `psql` as a PostgreSQL administrator:
-
-```sql
-CREATE USER treetutor_user WITH PASSWORD 'replace-with-a-strong-password';
-CREATE DATABASE treetutor OWNER treetutor_user;
-GRANT ALL PRIVILEGES ON DATABASE treetutor TO treetutor_user;
-```
-
-### 2. Configure the backend environment
-
-Copy the backend example environment file and add the connection string:
-
-```env
-DATABASE_URL=postgresql://treetutor_user:replace-with-a-strong-password@localhost:5432/treetutor
-```
-
-`backend/.env` is ignored by Git. Commit only `backend/.env.example` with placeholder values.
-
-### 3. Install Python database packages
-
-From `backend/`, use a virtual environment and install the PostgreSQL driver plus your ORM or query layer. With SQLAlchemy:
+The backend is optional for the frontend, but provides the local Ollama-powered tutor API.
 
 ```bash
+cd backend
 python -m venv .venv
 # Windows PowerShell
 .venv\Scripts\Activate.ps1
-pip install sqlalchemy "psycopg[binary]" python-dotenv
+pip install -r requirements.txt
+ollama pull qwen2.5-coder:7b
+uvicorn main:app --reload --port 8000
 ```
 
-Minimal connection example:
+Copy `backend/.env.example` to `backend/.env` only to change the Ollama URL, model, or permitted frontend origin. The default settings are suitable for local development.
 
-```python
-import os
-from dotenv import load_dotenv
-from sqlalchemy import create_engine
+The service exposes:
 
-load_dotenv()
-engine = create_engine(os.environ["DATABASE_URL"], pool_pre_ping=True)
-```
+- `GET /health` for a local health check.
+- `GET /api/questions` for the built-in question bank.
+- `POST /api/tutor` for tutor, debugging, and practice-mentor responses.
 
-### 4. Store application data
+## Knowledge base
 
-Useful first tables are `users`, `chats`, `messages`, `problems`, and `practice_submissions`. Store structured AI metadata such as source citations and test feedback in PostgreSQL `JSONB` fields when appropriate. Use migrations (for example Alembic) once schema changes begin.
+`backend/knowledge_base/tree_dsa.md` is the tutor's local reference source. At request time, `backend/rag.py` compares the learner's question with each `##`-level section and sends the best-matching sections to the tutor. No database, embedding model, indexing command, or seed step is required.
 
-## Authentication
+The included material covers tree fundamentals, binary trees, traversals, BST operations and validation, balanced trees, heaps, tries, LCA, recursion contracts, path backtracking, iterative traversal, and common edge cases.
 
-The login page is UI-only at present. When Auth.js/NextAuth is configured, connect the existing login UI to it; do not put database credentials or provider secrets in the browser.
+To extend it, add a descriptive `##` section to `tree_dsa.md`. Keep each section focused and include the relevant definition, complexity, trade-offs, and edge cases so retrieval has useful context to select from.
+
+## Frontend API routes
+
+- `POST /api/tutor` returns lightweight local tutor guidance for the frontend.
+- `POST /api/run` executes JavaScript, Python, or Java code locally.
+
+The code runner is intended for local learning only. Do not expose it publicly without moving execution into a properly isolated sandbox.
 
 ## Security and Git hygiene
 
-- `.gitignore` excludes dependencies, build output, Python caches, virtual environments, local databases, logs, and `.env` files.
-- Never commit real API keys, database URLs, or passwords.
-- Keep `*.example` environment files with only dummy values.
-- Run user-provided code in a properly isolated backend sandbox before offering real multi-language execution.
+- `.gitignore` excludes dependencies, build output, Python caches, virtual environments, logs, and `.env` files.
+- Never commit API keys or provider secrets.
+- Keep `.env.example` files limited to safe local defaults.
 
-## Development roadmap
+## Roadmap
 
-1. Connect authentication and user identity.
-2. Add PostgreSQL migrations and persistence for users, chats, and submissions.
-3. Add Python API endpoints with CORS configured for the frontend origin.
-4. Replace mock data one page at a time.
-5. Add RAG sources and tree data to Tutor API responses.
-6. Move code execution and AI analysis into a safe backend worker/sandbox.
+1. Connect the frontend to the FastAPI tutor and question endpoints.
+2. Add more focused Tree DSA reference sections and practice questions.
+3. Show retrieved source sections alongside tutor responses in the UI.
+4. Add authentication if user accounts become necessary.
+5. Move code execution and AI analysis into a safe worker or sandbox before deployment.

@@ -26,3 +26,21 @@ The lowest common ancestor (LCA) of two nodes is their deepest shared ancestor. 
 
 ## Common patterns
 Use recursion when the result depends naturally on child results: height, balanced-tree checking, diameter, path sum, and subtree validation. Use an explicit stack to avoid recursion-depth limits. For level-based questions, use BFS and process the queue size for each level. Track a global or returned best value carefully for diameter and maximum path sum.
+
+## Building and representing trees
+Interview problems commonly provide a tree through a `TreeNode` with `val`, `left`, and `right` fields, or as a level-order array where `null` means a missing child. A level-order array is not a heap unless the problem says it is: it is simply a compact way to describe the tree. When constructing from such an array, consume children with a queue and do not create nodes for `null` values. Clarify whether node values are unique before using values as identifiers.
+
+## Recursion contracts
+For a recursive helper, state exactly what it returns before writing code. For example, `height(node)` returns the height of the subtree rooted at `node`, and its base case for an empty subtree is usually `0`. A helper that validates balance can return `-1` for an invalid subtree and a non-negative height otherwise; this avoids recalculating heights and keeps the whole algorithm O(n). Prefer returning the information a parent needs over relying on mutable global state.
+
+## BST validation and duplicates
+Checking only that a node is greater than its left child and smaller than its right child is insufficient: a deep descendant can still violate an ancestor's bound. Validate a BST by carrying lower and upper bounds down the recursion, or by confirming that an inorder traversal is strictly increasing. Decide the duplicate policy up front. If duplicates go consistently to one side, make the corresponding comparison inclusive and keep that policy for search, insertion, and validation.
+
+## Paths, diameter, and backtracking
+A root-to-leaf path problem normally needs a path-local list. Append a node before exploring its children, then remove it when returning so sibling branches do not share stale values. For diameter measured in edges, each node can contribute `leftHeight + rightHeight`; update the best answer while a height helper returns `1 + max(leftHeight, rightHeight)`. A maximum path sum differs because a path may start and end anywhere: discard a child contribution when it is negative.
+
+## Choosing iterative traversal
+Use an explicit stack when recursion depth might exceed the language limit. Iterative preorder pushes right before left so left is processed first. Iterative inorder repeatedly pushes the left spine, visits one node, then moves right. Postorder can use a visited flag or two stacks. For BFS, use a queue with an index or deque-style structure; repeatedly removing from the front of a JavaScript array can make a linear traversal accidentally quadratic.
+
+## Edge cases checklist
+Before finalizing a tree solution, test an empty tree, one node, a completely skewed tree, duplicate values when allowed, negative values for sum problems, and a case where the answer lies entirely in one subtree. Check whether a problem defines height and diameter in nodes or edges, whether targets are guaranteed to exist, and whether modifying the input tree is allowed.
